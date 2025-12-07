@@ -1,40 +1,109 @@
 from __future__ import annotations
 import math
 import random
-from dataclasses import dataclass
 from typing import List, Set, Tuple, Optional
 import argparse
 import tkinter as tk
 from tkinter import ttk, messagebox
 import time
 
-@dataclass(frozen=True, order=True)
 class Point:
-    x: float
-    y: float
+    def __init__(self, x: float, y: float):
+        self.x = x
+        self.y = y
 
 def euclidean(a: Point, b: Point) -> float:
     return math.hypot(a.x - b.x, a.y - b.y)
 
-def find_close_pairs(points: List[Point], threshold: float) -> Set[Tuple[Point, Point]]:
-    """
-    Encuentra TODOS los pares de puntos que están a distancia <= threshold
-    """
-    close_pairs = set()
+def closest_pair_rec(points_sorted_by_x: List[Point], points_sorted_by_y: List[Point]) -> Tuple[float, List[Tuple[Point, Point]]]:
+    n = len(points_sorted_by_x)
     
-    # COMPARAR CADA PUNTO CON TODOS LOS DEMÁS
+    # Si hay 3 o menos puntos, usamos la fuerza bruta
+    if n <= 3:
+        return brute_force_closest(points_sorted_by_x)
+    
+    mid = n // 2
+    left_points = points_sorted_by_x[:mid]
+    right_points = points_sorted_by_x[mid:]
+    
+    left_sorted_by_y = [p for p in points_sorted_by_y if p in left_points]
+    right_sorted_by_y = [p for p in points_sorted_by_y if p in right_points]
+    
+    left_dist, left_pairs = closest_pair_rec(left_points, left_sorted_by_y)
+    right_dist, right_pairs = closest_pair_rec(right_points, right_sorted_by_y)
+    
+    min_dist = min(left_dist, right_dist)
+    min_pairs = left_pairs if left_dist < right_dist else right_pairs
+    
+    # Buscar los pares cercanos que cruzan entre las mitades
+    band_pairs = find_cross_band_pairs(left_points, right_points, points_sorted_by_y, min_dist)
+    
+    # Combina los pares encontrados en las mitades con los cruzados
+    all_pairs = min_pairs + band_pairs
+    
+    return min_dist, all_pairs
+
+def find_cross_band_pairs(left_points: List[Point], right_points: List[Point], points_sorted_by_y: List[Point], threshold: float) -> List[Tuple[Point, Point]]:
+    band_pairs = []
+    mid_x = left_points[-1].x  # Último punto en la mitad izquierda
+    
+    # Filtrar los puntos que están dentro de la banda (umbral en el eje X)
+    band_points = [p for p in points_sorted_by_y if abs(p.x - mid_x) < threshold]
+    
+    # Comparar cada punto de la banda con los siguientes puntos dentro de la banda
+    for i in range(len(band_points)):
+        for j in range(i + 1, len(band_points)):
+            # Si la diferencia en Y es mayor que el umbral, no hace falta seguir
+            if band_points[j].y - band_points[i].y > threshold:
+                break  # Los puntos en y ya están demasiado distantes
+            distance = euclidean(band_points[i], band_points[j])
+            if distance <= threshold:
+                band_pairs.append((band_points[i], band_points[j]))  # Agregar el par si cumple el umbral
+    return band_pairs
+
+
+def find_closest_pairs(points: List[Point], threshold: float):
+    """
+    Encuentra la distancia mínima entre puntos (min_dist)
+    y TODOS los pares que están a esa distancia mínima,
+    siempre y cuando dicha distancia sea <= threshold.
+    """
+    # Casos borde: 0 o 1 punto -> no hay pares
+    if len(points) <= 1:
+        return float('inf'), []
+
+    # Usamos la implementación de fuerza bruta para obtener:
+    # - la distancia mínima correcta
+    # - todos los pares que tienen esa distancia mínima
+    min_dist, min_pairs = brute_force_closest(points)
+
+    # Ahora filtramos esos pares según el threshold
+    close_pairs_filtered: List[Tuple[Point, Point]] = []
+    for a, b in min_pairs:
+        dist = euclidean(a, b)
+        if dist <= threshold:
+            close_pairs_filtered.append((a, b))
+
+    return min_dist, close_pairs_filtered
+
+def brute_force_closest(points: List[Point]) -> Tuple[float, List[Tuple[Point, Point]]]:
+    min_dist = float('inf')
+    closest_pairs = []
     for i in range(len(points)):
         for j in range(i + 1, len(points)):
-            distance = euclidean(points[i], points[j])
-            if distance <= threshold:
-                close_pairs.add((points[i], points[j]))
-    
-    return close_pairs
+            dist = euclidean(points[i], points[j])
+            if dist < min_dist:
+                min_dist = dist
+                closest_pairs = [(points[i], points[j])]
+            elif dist == min_dist:
+                closest_pairs.append((points[i], points[j]))
+    return min_dist, closest_pairs
 
 def generate_random_points(n: int, xmin: float, xmax: float, ymin: float, ymax: float, seed: Optional[int]=None) -> List[Point]:
     if seed is not None:
         random.seed(seed)
     return [Point(random.uniform(xmin, xmax), random.uniform(ymin, ymax)) for _ in range(n)]
+
 
 class SimpleCollisionVisualizer:
     def __init__(self, root):
@@ -64,8 +133,8 @@ class SimpleCollisionVisualizer:
         # Título
         title_label = ttk.Label(main_frame, 
                                text="🔍 Detección de Pares Cercanos", 
-                               font=("Arial", 14, "bold"))
-        title_label.grid(row=0, column=0, columnspan=2, pady=(0, 10))
+                               font=("Arial", 16, "bold"))
+        title_label.grid(row=0, column=0, columnspan=2, pady=(10, 10))
         
         # Panel de control
         control_frame = ttk.LabelFrame(main_frame, text="Configuración", padding="10")
@@ -84,23 +153,20 @@ class SimpleCollisionVisualizer:
         self.seed_var = tk.StringVar(value="42")
         ttk.Entry(control_frame, textvariable=self.seed_var, width=10).grid(row=2, column=1, sticky=tk.W, pady=5)
         
-        # Rango
-        ttk.Label(control_frame, text="Rango (0 a 100):").grid(row=3, column=0, columnspan=2, sticky=tk.W, pady=5)
-        
         # Botones
         button_frame = ttk.Frame(control_frame)
         button_frame.grid(row=4, column=0, columnspan=2, pady=15)
         
         ttk.Button(button_frame, text="Generar y Analizar", 
-                  command=self.generate_and_analyze, width=15).grid(row=0, column=0, pady=5)
+                  command=self.generate_and_analyze, width=20).grid(row=0, column=0, pady=5)
         ttk.Button(button_frame, text="Limpiar", 
-                  command=self.clear_canvas, width=15).grid(row=1, column=0, pady=5)
+                  command=self.clear_canvas, width=20).grid(row=1, column=0, pady=5)
         
         # Información
         info_frame = ttk.LabelFrame(control_frame, text="Resultados", padding="5")
         info_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=10)
         
-        self.info_text = tk.Text(info_frame, height=10, width=25, font=("Courier", 8))
+        self.info_text = tk.Text(info_frame, height=10, width=35, font=("Courier", 8))
         scrollbar = ttk.Scrollbar(info_frame, orient="vertical", command=self.info_text.yview)
         self.info_text.configure(yscrollcommand=scrollbar.set)
         self.info_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
@@ -119,10 +185,8 @@ class SimpleCollisionVisualizer:
     def scale_point(self, point: Point) -> tuple:
         """Convierte coordenadas reales a coordenadas del canvas"""
         xmin, xmax, ymin, ymax = 0, 100, 0, 100
-        
         x = self.margin + (point.x - xmin) / (xmax - xmin) * (self.canvas_width - 2 * self.margin)
         y = self.canvas_height - self.margin - (point.y - ymin) / (ymax - ymin) * (self.canvas_height - 2 * self.margin)
-        
         return x, y
     
     def generate_and_analyze(self):
@@ -138,36 +202,29 @@ class SimpleCollisionVisualizer:
                 messagebox.showerror("Error", "El umbral debe ser mayor que 0")
                 return
             
-            # Manejar semilla (puede estar vacía)
             seed = int(seed_text) if seed_text else None
-            
-            # Generar puntos
             self.points = generate_random_points(n, 0, 100, 0, 100, seed)
             
-            # Encontrar pares cercanos
             start_time = time.time()
-            self.close_pairs = find_close_pairs(self.points, threshold)
+            min_dist, close_pairs = find_closest_pairs(self.points, threshold)
             end_time = time.time()
             
-            # Mostrar resultados
-            self.display_results(end_time - start_time, threshold)
+            self.display_results(end_time - start_time, min_dist, close_pairs, threshold)
             self.draw_all_points()
             
         except ValueError as e:
             messagebox.showerror("Error", "Por favor ingrese valores válidos")
-    
-    def display_results(self, execution_time: float, threshold: float):
+
+    def display_results(self, execution_time: float, min_dist: float, close_pairs: List[Tuple[Point, Point]], threshold: float):
         info = f"{'='*30}\n"
         info += f"Puntos: {len(self.points)}\n"
         info += f"Umbral: {threshold:.1f}\n"
         info += f"Tiempo: {execution_time*1000:.1f} ms\n"
-        info += f"Pares cercanos: {len(self.close_pairs)}\n"
+        info += f"Pares cercanos: {len(close_pairs)}\n"
         info += f"{'='*30}\n\n"
         
-        if self.close_pairs:
-            # ORDENAR por distancia para mejor visualización
-            sorted_pairs = sorted(self.close_pairs, key=lambda pair: euclidean(pair[0], pair[1]))
-            
+        if close_pairs:
+            sorted_pairs = sorted(close_pairs, key=lambda pair: euclidean(pair[0], pair[1]))
             info += "🔴 PARES CERCANOS DETECTADOS:\n"
             info += f"{'-'*25}\n"
             
@@ -177,91 +234,70 @@ class SimpleCollisionVisualizer:
                 info += f"  A: ({a.x:5.1f}, {a.y:5.1f})\n"
                 info += f"  B: ({b.x:5.1f}, {b.y:5.1f})\n"
                 info += f"  📏 Distancia: {dist:.2f}\n"
-                
-                # Clasificar el riesgo (texto)
-                if dist <= threshold * 0.5:
-                    info += f"  🚨 ALTO RIESGO\n"
-                elif dist <= threshold * 0.8:
-                    info += f"  ⚠️  RIESGO MEDIO\n"
-                else:
-                    info += f"  🔶 RIESGO BAJO\n"
-                    
-                if i < len(sorted_pairs):
-                    info += f"{'-'*20}\n"
+                info += f"{'-'*20}\n"
         else:
             info += "✅ TODOS LOS PUNTOS ESTÁN SEGUROS\n"
             info += "No se detectaron pares cercanos\n"
-            
+        
         self.info_text.delete(1.0, tk.END)
         self.info_text.insert(1.0, info)
-    
+
     def draw_all_points(self):
         self.canvas.delete("all")
-        
-        # Dibujar fondo con cuadrícula
         self.draw_grid()
         
-        # PRIMERO: Dibujar TODOS los puntos (azules)
+        # Dibujar los puntos en el canvas
         for point in self.points:
             x, y = self.scale_point(point)
             self.canvas.create_oval(x-4, y-4, x+4, y+4, fill="blue", outline="darkblue", width=1)
-            self.canvas.create_text(x, y-10, text=f"({point.x:.0f},{point.y:.0f})", 
-                                  font=("Arial", 7), fill="blue")
+            self.canvas.create_text(x, y-10, text=f"({point.x:.0f},{point.y:.0f})", font=("Arial", 7), fill="blue")
         
-        # Obtener umbral de manera segura
+        # Verifica si los puntos cercanos deben ser dibujados
         try:
             threshold = float(self.threshold_var.get())
         except Exception:
             threshold = 0.0
         
-        # LUEGO: Dibujar TODAS las líneas rojas para pares cercanos (según tu pedido)
+        # Dibuja las líneas rojas para pares cercanos
         for a, b in self.close_pairs:
             x1, y1 = self.scale_point(a)
             x2, y2 = self.scale_point(b)
             dist = euclidean(a, b)
             
-            # Para cumplir tu requerimiento: todas las parejas bajo el umbral conectadas con rojo.
-            # Ajustamos el grosor según cuán cercano sea (más cercano -> línea más gruesa)
-            if threshold > 0 and dist <= threshold * 0.5:
-                color = "red"
-                width = 3
-            else:
+            # Solo dibuja la línea si la distancia está dentro del umbral
+            if dist <= threshold:
                 color = "red"
                 width = 2
-            
-            # Línea conectando los puntos cercanos (todas en rojo)
-            self.canvas.create_line(x1, y1, x2, y2, fill=color, width=width)
-            
-            # Resaltar los puntos conectados (usar un contorno rojo claro)
-            self.canvas.create_oval(x1-6, y1-6, x1+6, y1+6, fill="white", outline=color, width=2)
-            self.canvas.create_oval(x2-6, y2-6, x2+6, y2+6, fill="white", outline=color, width=2)
-            
-            # Mostrar distancia en la línea (texto sin bg para evitar error)
-            mid_x = (x1 + x2) / 2
-            mid_y = (y1 + y2) / 2
-            self.canvas.create_text(mid_x, mid_y, text=f"{dist:.1f}", 
-                                  fill="darkred", font=("Arial", 8, "bold"))
+                if dist <= threshold * 0.5:
+                    width = 3  # Línea más gruesa para pares más cercanos
+                
+                # Dibuja la línea de conexión entre los puntos
+                self.canvas.create_line(x1, y1, x2, y2, fill=color, width=width)
+                
+                # Dibuja los puntos conectados con un contorno de color
+                self.canvas.create_oval(x1-6, y1-6, x1+6, y1+6, fill="white", outline=color, width=2)
+                self.canvas.create_oval(x2-6, y2-6, x2+6, y2+6, fill="white", outline=color, width=2)
+                
+                # Mostrar distancia de la línea
+                mid_x = (x1 + x2) / 2
+                mid_y = (y1 + y2) / 2
+                self.canvas.create_text(mid_x, mid_y, text=f"{dist:.1f}", fill="darkred", font=("Arial", 8, "bold"))
         
-        # FINALMENTE: Leyenda
+        # Dibujar la leyenda
         self.draw_legend()
+
     
     def draw_grid(self):
-        """Dibuja una cuadrícula para mejor referencia"""
         for i in range(0, 101, 20):
-            # Líneas verticales
             x = self.margin + (i / 100) * (self.canvas_width - 2 * self.margin)
-            self.canvas.create_line(x, self.margin, x, self.canvas_height - self.margin, 
-                                  fill="lightgray", dash=(2, 2))
+            self.canvas.create_line(x, self.margin, x, self.canvas_height - self.margin, fill="lightgray", dash=(2, 2))
             self.canvas.create_text(x, self.canvas_height - 25, text=str(i), font=("Arial", 8))
             
-            # Líneas horizontales  
             y = self.canvas_height - self.margin - (i / 100) * (self.canvas_height - 2 * self.margin)
-            self.canvas.create_line(self.margin, y, self.canvas_width - self.margin, y, 
-                                  fill="lightgray", dash=(2, 2))
+            self.canvas.create_line(self.margin, y, self.canvas_width - self.margin, y, fill="lightgray", dash=(2, 2))
             self.canvas.create_text(25, y, text=str(i), font=("Arial", 8))
     
     def draw_legend(self):
-        """Dibuja la leyenda"""
         self.canvas.create_rectangle(10, 10, 25, 25, fill="blue", outline="black")
         self.canvas.create_text(35, 18, text="Aviones", anchor=tk.W, font=("Arial", 8))
         
@@ -285,14 +321,13 @@ def main():
     
     if args.cli:
         points = generate_random_points(args.n, 0, 100, 0, 100, args.seed)
-        close_pairs = find_close_pairs(points, args.threshold)
+        close_pairs = find_closest_pairs(points, args.threshold)
         
         print(f"Puntos generados: {len(points)}")
         print(f"Umbral: {args.threshold}")
         print(f"Pares cercanos encontrados: {len(close_pairs)}")
         print("-" * 50)
         
-        # Ordenar por distancia
         sorted_pairs = sorted(close_pairs, key=lambda pair: euclidean(pair[0], pair[1]))
         
         for i, (a, b) in enumerate(sorted_pairs, 1):
