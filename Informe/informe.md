@@ -4,7 +4,7 @@
 
 **Para el curso:** Análisis y Diseño de Algoritmos I  
 **Profesor:** Ing. Mateo Echeverry Correa  
-**Estudiantes:** [RIVERA ARIAS LAURA SOFIA (2380712-3743) RODRIGUEZ GUTIERREZ JUAN PABLO (2380-3743)]  
+**Estudiantes:** [RIVERA ARIAS LAURA SOFIA (2380712-3743) RODRIGUEZ GUTIERREZ JUAN PABLO (2380422-3743)]  
 **Fecha:** [SIETE DE DICEMBRE 2025]
 **Semestre:** 2025-II
 **Universidad del Valle**
